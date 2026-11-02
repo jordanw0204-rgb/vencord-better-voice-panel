@@ -13,13 +13,13 @@ import definePlugin from "@utils/types";
 import { findByPropsLazy } from "@webpack";
 import { ApplicationStreamingStore, ChannelRouter, ChannelStore, ContextMenuApi, FluxDispatcher, MediaEngineStore, Menu, Popout, SelectedChannelStore,SoundboardStore, Text, Tooltip, useEffect, useLayoutEffect, useMemo, useRef, UserStore, useState, useStateFromStores, VoiceStateStore } from "@webpack/common";
 
+import { isUserSpeaking, useSpeakingKey } from "./speaking";
 import managedStyle from "./style.css?managed";
 
 const cl = classNameFactory("vc-compact-voice-panel-");
 const { selectVoiceChannel } = findByPropsLazy("selectVoiceChannel", "selectChannel");
 const ChannelActionCreators = findByPropsLazy("openPrivateChannel", "getDMChannel");
 const MediaEngineActions = findByPropsLazy("setLocalVolume", "toggleLocalMute");
-const SpeakingStore = findByPropsLazy("isSpeaking");
 const pendingVolumes = new Map<string, number>();
 const volumeFrames = new Map<string, number>();
 const collapsedTileWidth = 146;
@@ -162,21 +162,6 @@ function getAvatarUrl(user: any, size = 48) {
 
 function isUserStreaming(userId: string, voiceState?: any) {
     return Boolean(voiceState?.selfStream || voiceState?.stream || ApplicationStreamingStore.getAnyStreamForUser(userId));
-}
-
-function isUserSpeaking(userId: string) {
-    const mediaEngine = MediaEngineStore.getMediaEngine?.() as any;
-
-    try {
-        return Boolean(
-            SpeakingStore.isSpeaking?.(userId)
-            ?? (MediaEngineStore as any).isSpeaking?.(userId)
-            ?? mediaEngine?.isSpeaking?.(userId)
-            ?? mediaEngine?.getSpeakingFlags?.(userId)
-        );
-    } catch {
-        return false;
-    }
 }
 
 function getVoiceChannelName(channel: ReturnType<typeof ChannelStore.getChannel> | undefined) {
@@ -541,12 +526,13 @@ function CompactVoicePanel() {
     const speakingRef = useRef(new Map<string, boolean>());
     const [showPopout, setShowPopout] = useState(false);
     const [expanded, setExpanded] = useState(false);
-    const [speakingKey, setSpeakingKey] = useState("");
 
     const voiceChannelId = useStateFromStores(
         [SelectedChannelStore],
         () => SelectedChannelStore.getVoiceChannelId()
     );
+
+    const speakingKey = useSpeakingKey(voiceChannelId);
 
     const voiceStateKey = useStateFromStores(
         [VoiceStateStore, MediaEngineStore],
@@ -558,8 +544,7 @@ function CompactVoicePanel() {
                 .map((voiceState: any) => [
                     voiceState.userId,
                     voiceState.selfStream ? "1" : "0",
-                    voiceState.stream ? "1" : "0",
-                    isUserSpeaking(voiceState.userId) ? "1" : "0"
+                    voiceState.stream ? "1" : "0"
                 ].join(":"))
                 .sort()
                 .join("|");
@@ -603,33 +588,6 @@ function CompactVoicePanel() {
             resizeObserver.disconnect();
             window.removeEventListener("resize", scheduleUpdate);
         };
-    }, [voiceChannelId]);
-
-    useEffect(() => {
-        if (!voiceChannelId) return;
-        const channelId = voiceChannelId;
-
-        function readSpeakingKey() {
-            const states = VoiceStateStore.getVoiceStatesForChannel(channelId) ?? {};
-            return Object.values(states)
-                .filter((voiceState: any) => isUserSpeaking(voiceState.userId))
-                .map((voiceState: any) => voiceState.userId)
-                .sort()
-                .join("|");
-        }
-
-        let previousKey = readSpeakingKey();
-        setSpeakingKey(previousKey);
-
-        const intervalId = window.setInterval(() => {
-            const nextKey = readSpeakingKey();
-            if (nextKey === previousKey) return;
-
-            previousKey = nextKey;
-            setSpeakingKey(nextKey);
-        }, 50);
-
-        return () => window.clearInterval(intervalId);
     }, [voiceChannelId]);
 
     const voiceUsers = useMemo(
